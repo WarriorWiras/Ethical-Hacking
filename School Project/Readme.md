@@ -20,7 +20,7 @@ Everything is presented **as a flow**, mirroring how real-world security teams o
 
 ---
 
-## 🛡️ PART 1 — DEFENSE (Blue Team Setup)
+## 🛡️ PART 1 - DEFENSE (Blue Team Setup)
 
 ### 1.1 Objective
 
@@ -50,19 +50,19 @@ This server acts as:
 
 ### 1.3 Defensive Build Flow
 
-#### Step 1 — Base System Setup
+#### Step 1 - Base System Setup
 
 * Updated OS packages
 * Installed Apache2, PHP, MySQL
 * Created least-privilege service users
 
-#### Step 2 — Company Website (Port 443)
+#### Step 2 - Company Website (Port 443)
 
 * Static HTTPS landing page
 * Company branding and metadata
 * Public-facing information only
 
-#### Step 3 — Social Engineering Surface
+#### Step 3 - Social Engineering Surface
 
 * Instagram business page created
 * Username and password hints embedded in posts
@@ -70,7 +70,7 @@ This server acts as:
 
 > Purpose: Simulate real-world OSINT leakage
 
-#### Step 4 — FTP Service (Intentional Weakness)
+#### Step 4 - FTP Service (Intentional Weakness)
 
 * FTP enabled with accessible development files
 * Blog source code stored on FTP
@@ -144,7 +144,7 @@ This completes the **Setting up the server**.
 
 ---
 
-## ⚔️ PART 2 — ATTACK (Red Team Assessment)
+## ⚔️ PART 2 - ATTACK (Red Team Assessment)
 
 ### 2.1 Objective
 
@@ -185,12 +185,12 @@ Findings included:
 
 ### 2.4 Initial Access
 
-#### Vector 1 — Credential Reuse
+#### Vector 1 - Credential Reuse
 
 * Database credentials obtained via SQL injection
 * Same credentials reused for SSH access
 
-#### Vector 2 — Web Exploitation
+#### Vector 2 - Web Exploitation
 
 * Read-only SQL injection used to dump hashes
 * Hashes cracked using GPU-assisted `hashcat`
@@ -269,8 +269,8 @@ Defense and attack are **two sides of the same system**.
 
 Special thanks to:
 
-* **WordPress** — for providing a flexible and realistic CMS platform
-* **WooCommerce** — for enabling real-world e-commerce attack surfaces
+* **WordPress** - for providing a flexible and realistic CMS platform
+* **WooCommerce** - for enabling real-world e-commerce attack surfaces
 
 These tools made it possible to simulate **authentic enterprise scenarios**.
 
