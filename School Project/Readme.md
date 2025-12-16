@@ -138,7 +138,7 @@ This completes the **Blue Team phase**.
 
 
 ### 1.8 Attack Flow Summary
-![alt text](Defense/Attack%20Flow%20Diagram.png)
+<img src="Defense/Attack%20Flow%20Diagram.png" height="50%" />
 
 This completes the **Setting up the server**.
 
