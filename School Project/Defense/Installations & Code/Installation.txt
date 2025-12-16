@@ -1,0 +1,42 @@
+sudo apt install apache2 mysql-server php php-mysql php-cli php-curl php-xml php-mbstring unzip curl -y
+sudo mysql_secure_installation
+sudo mysql -u root -p
+```
+ALTER USER 'root'@'localhost' IDENTIFIED BY 'MySQL_Daiwa_Scarlet_133';
+CREATE DATABASE wordpress;
+CREATE USER 'wpuser'@'localhost' IDENTIFIED BY 'WordPress_Admire_Vega_2';
+GRANT ALL PRIVILEGES ON wordpress.* TO 'wpuser'@'localhost';
+FLUSH PRIVILEGES;
+EXIT;
+```
+
+cd /var/www/html
+sudo curl -O https://wordpress.org/latest.zip
+sudo unzip latest.zip
+sudo mv wordpress/* .
+sudo chown -R www-data:www-data /var/www/html
+sudo chmod -R 755 /var/www/html
+sudo cp wp-config-sample.php wp-config.php
+sudo nano wp-config.php
+curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+php wp-cli.phar --info
+chmod +x wp-cli.phar
+sudo mv wp-cli.phar /usr/local/bin/wp
+wp --info
+
+cd /var/www/html
+adduser user
+chown -R user:user /var/www/html
+ wp core install --url="<ip address>:8000" --title="Nordic Minimalist" --admin_user="horse" --admin_password="Q1=W2=E3=R4=T5=Y6" --admin_email="admin@localhost.com"
+
+wp plugin install woocommerce --activate
+
+shop manager
+
+
+<hello>[alg_product_meta name="hello" custom_function="system"]</hello>
+
+CVE-2025-49887 
+
+
+MySQL_Admire_Groove_1

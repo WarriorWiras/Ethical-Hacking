@@ -1,0 +1,254 @@
+1) Week-3 Vulnerable Bootstrap
+Save as 01_week3_bootstrap.sh, then chmod +x 01_week3_bootstrap.sh && sudo ./01_week3_bootstrap.sh.
+
+
+#!/usr/bin/env bash
+set -euo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+
+echo "[*] Updating base system..."
+apt-get update
+apt-get -y install curl wget git unzip net-tools lsb-release ca-certificates gnupg
+
+echo "[*] Creating weak user (student / Password123!)..."
+if ! id student >/dev/null 2>&1; then
+  adduser --disabled-password --gecos "" student
+  echo "student:Password123!" | chpasswd
+  usermod -aG sudo student
+fi
+
+echo "[*] Enabling SSH password auth..."
+cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.wk3 || true
+sed -i "s/^#PasswordAuthentication yes/PasswordAuthentication yes/" /etc/ssh/sshd_config || true
+sed -i "s/^PasswordAuthentication no/PasswordAuthentication yes/" /etc/ssh/sshd_config || true
+systemctl restart ssh
+
+echo "[*] Installing LAMP..."
+apt-get -y install apache2 mariadb-server php php-mysqli php-gd php-xml php-curl php-zip php-mbstring libapache2-mod-php
+systemctl enable --now apache2
+systemctl enable --now mariadb
+
+echo "[*] Exposing MariaDB on 0.0.0.0 (weak for Week 3)..."
+sed -i "s/^bind-address.*/bind-address = 0.0.0.0/" /etc/mysql/mariadb.conf.d/50-server.cnf
+systemctl restart mariadb
+
+mysql -e "CREATE DATABASE IF NOT EXISTS dvwadb;"
+mysql -e "CREATE USER IF NOT EXISTS 'dvwa'@'%' IDENTIFIED BY 'dvwa123';"
+mysql -e "GRANT ALL PRIVILEGES ON dvwadb.* TO 'dvwa'@'%'; FLUSH PRIVILEGES;"
+
+echo "[*] Loosening PHP for demo..."
+PHPINI=/etc/php/$(php -r "echo PHP_MAJOR_VERSION.\".\".PHP_MINOR_VERSION;")/apache2/php.ini
+cp "$PHPINI" "${PHPINI}.bak.wk3" || true
+sed -i "s/^;*allow_url_include.*/allow_url_include = On/" "$PHPINI"
+sed -i "s/^;*allow_url_fopen.*/allow_url_fopen = On/" "$PHPINI"
+systemctl restart apache2
+
+echo "[*] Deploying DVWA..."
+cd /var/www/html
+if [ ! -d dvwa ]; then
+  git clone https://github.com/digininja/DVWA.git dvwa
+fi
+chown -R www-data:www-data /var/www/html/dvwa
+
+cd /var/www/html/dvwa/config
+cp config.inc.php.dist config.inc.php
+sed -i "s/'db_user'.*/'db_user' ] = 'dvwa';/" config.inc.php
+sed -i "s/'db_password'.*/'db_password' ] = 'dvwa123';/" config.inc.php
+sed -i "s/'db_database'.*/'db_database' ] = 'dvwadb';/" config.inc.php
+sed -i "s/'default_security_level'.*/'default_security_level' ] = 'low';/" config.inc.php
+
+echo "[*] Setting writable dirs (intentionally lax)..."
+mkdir -p /var/www/html/dvwa/hackable/uploads
+chmod 777 /var/www/html/dvwa/hackable/uploads || true
+mkdir -p /var/www/html/dvwa/external/phpids/0.6/lib/IDS/tmp
+chmod -R 777 /var/www/html/dvwa/external/phpids/0.6/lib/IDS/tmp || true
+
+echo "[*] Apache directory override for DVWA..."
+a2enmod rewrite
+cat >/etc/apache2/conf-available/dvwa.conf <<EOF
+<Directory /var/www/html/dvwa>
+    AllowOverride All
+    Require all granted
+</Directory>
+EOF
+a2enconf dvwa
+systemctl reload apache2
+
+echo "[*] (Optional) Installing weak FTP (vsftpd)..."
+apt-get -y install vsftpd
+cp /etc/vsftpd.conf /etc/vsftpd.conf.bak.wk3 || true
+sed -i "s/^#*anonymous_enable=.*/anonymous_enable=YES/" /etc/vsftpd.conf
+sed -i "s/^#*local_enable=.*/local_enable=YES/" /etc/vsftpd.conf
+sed -i "s/^#*write_enable=.*/write_enable=YES/" /etc/vsftpd.conf
+systemctl restart vsftpd
+
+cat >/var/www/html/index.html <<EOF
+<!doctype html><html><body>
+<h2>ICT2212 Lab – Vulnerable Host (Week 3)</h2>
+<ul>
+<li>DVWA: <a href="/dvwa/">/dvwa/</a> (login: admin / password)</li>
+<li>MySQL: dvwa/dvwa123 @ tcp/3306 (open)</li>
+<li>FTP: anonymous enabled @ tcp/21</li>
+</ul>
+<p><em>For educational use only.</em></p>
+</body></html>
+EOF
+systemctl reload apache2
+
+echo
+echo "[✓] Week-3 vulnerable state ready."
+echo "    Visit: http://<EC2_PUBLIC_IP>/dvwa/setup.php and click Create/Reset DB if prompted."
+echo "    Ensure your Security Group allows TCP 22,80,21,3306 for your demo."
+
+
+
+🔹 Week 3 Setup — Full Explanation
+1. Provision EC2 on AWS
+
+I launched an Ubuntu Server 22.04 LTS EC2 instance (t2.micro/t3.micro is enough).
+
+Created and downloaded an SSH keypair for access.
+
+Assigned a Security Group that (for now) allows inbound access from anywhere (0.0.0.0/0) to:
+
+TCP 22 → SSH
+
+TCP 80 → Web (Apache/DVWA)
+
+TCP 21 → FTP (vsftpd)
+
+TCP 3306 → MySQL (MariaDB)
+
+Associated an Elastic IP to keep the server reachable with a fixed address.
+
+✅ At this stage, the server is reachable from the internet with intentionally weak firewall rules.
+
+2. Created a Low-Privilege User With Weak Password
+
+Added a user called student and set a weak password (Password123!).
+
+Also allowed this user sudo access.
+
+Modified the SSH config to re-enable password-based login (insecure).
+
+⚠️ Normally, AWS requires SSH keypairs only (very secure). By allowing passwords and a weak one, I introduced a deliberate vulnerability for brute-force or credential-guessing attacks.
+
+3. Installed LAMP Stack (Linux + Apache + MySQL/MariaDB + PHP)
+
+Installed Apache2 web server and enabled it at boot.
+
+Installed MariaDB (MySQL-compatible DB) and PHP with extensions (mysqli, gd, xml, curl, etc.).
+
+Ensured services run automatically.
+
+✅ This provides the platform to host vulnerable web apps (like DVWA).
+
+4. Exposed MySQL to the Internet
+
+Edited MariaDB config (50-server.cnf) to bind on 0.0.0.0 instead of localhost.
+
+Restarted MariaDB so it listens on all network interfaces.
+
+Created a database dvwadb and a user dvwa with weak password dvwa123.
+
+Granted all privileges to this user on all hosts ('dvwa'@'%').
+
+⚠️ This is insecure because:
+
+MySQL should never be exposed directly to the internet.
+
+Weak username/password combination is easy to guess or brute-force.
+
+5. Weakened PHP Configuration
+
+Modified php.ini to set:
+
+allow_url_fopen = On
+
+allow_url_include = On
+
+⚠️ This enables Remote File Inclusion (RFI) vulnerabilities, where malicious scripts can be pulled from remote servers.
+
+6. Installed DVWA (Damn Vulnerable Web Application)
+
+Cloned DVWA into /var/www/html/dvwa.
+
+Configured config.inc.php with the weak MySQL creds (dvwa/dvwa123).
+
+Set default security level = Low.
+
+Made directories world-writable (chmod 777) for uploads and IDS logs.
+
+✅ DVWA is purposely insecure and provides exploitable scenarios: SQL injection, command injection, XSS, file upload, brute-force login, etc.
+
+7. Enabled Apache Overrides
+
+Turned on mod_rewrite.
+
+Added an Apache config block to allow .htaccess rules in /dvwa.
+
+Reloaded Apache.
+
+⚠️ .htaccess can be abused if writable by attackers.
+
+8. Set Up FTP With Anonymous Access
+
+Installed vsftpd.
+
+Edited config to allow:
+
+anonymous_enable=YES (anyone can login as “anonymous”)
+
+local_enable=YES and write_enable=YES (local users like student can upload files).
+
+Restarted FTP service.
+
+⚠️ Anonymous FTP is a huge security risk — anyone can connect and potentially upload/download files.
+
+9. Created a Custom Info Page
+
+Added a landing page at http://<IP>/ showing:
+
+DVWA URL and default creds (admin/password)
+
+MySQL weak creds (dvwa/dvwa123)
+
+FTP anonymous access info
+
+✅ This is just for demonstration/reporting so attackers know what’s exposed.
+
+10. Verified Open Ports
+
+Ran ss -tulpn to confirm services are listening:
+
+SSH on 22
+
+FTP on 21
+
+Apache on 80
+
+MariaDB on 3306
+
+🔎 Why This Setup Is Vulnerable (and Useful for Demo)
+
+Weak SSH account (student/Password123!) → easy to brute force.
+
+FTP anonymous login enabled → anyone can browse/upload.
+
+MySQL open on 3306 with weak creds → direct DB compromise.
+
+DVWA “Low” security → full range of classic web app exploits.
+
+PHP insecure settings (RFI, LFI) → remote code execution potential.
+
+World-writable dirs → file upload attacks possible.
+
+This is exactly what you want for Week 3 demo:
+
+You can run nmap, gobuster, nikto, hydra, sqlmap against it.
+
+You can show footprinting, scanning, enumeration, exploitation all in one go.
+
+✅ In summary:
+For Week 3, I built a deliberately vulnerable Ubuntu server on AWS with multiple insecure services (Apache+DVWA, MySQL open to world, weak SSH account, anonymous FTP, insecure PHP). This state is ideal for practicing ethical hacking techniques before applying hardening in Week 6.

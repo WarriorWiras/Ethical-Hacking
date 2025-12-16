@@ -1,0 +1,231 @@
+week-6 Hardening Script
+Save as 02_week6_hardening.sh, then chmod +x 02_week6_hardening.sh && sudo ./02_week6_hardening.sh.
+
+#!/usr/bin/env bash
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+echo "[*] Patching & base hardening..."
+apt-get update
+apt-get -y full-upgrade
+apt-get -y install unattended-upgrades apt-listchanges ufw fail2ban auditd libapache2-mod-security2 modsecurity-crs
+
+dpkg-reconfigure --priority=low unattended-upgrades
+
+echo "[*] SSH hardening (disable password, no root)..."
+cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.wk6 || true
+sed -i "s/^PasswordAuthentication yes/PasswordAuthentication no/" /etc/ssh/sshd_config || true
+sed -i "s/^#PasswordAuthentication no/PasswordAuthentication no/" /etc/ssh/sshd_config || true
+sed -i "s/^#PermitRootLogin .*/PermitRootLogin no/" /etc/ssh/sshd_config || true
+systemctl restart ssh
+
+echo "[*] UFW: default deny inbound; allow 22,80,443..."
+ufw --force reset
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw --force enable
+ufw status verbose
+
+echo "[*] Removing FTP and closing port 21..."
+systemctl disable --now vsftpd || true
+apt-get -y purge vsftpd || true
+
+echo "[*] MariaDB: bind to localhost only..."
+cp /etc/mysql/mariadb.conf.d/50-server.cnf /etc/mysql/mariadb.conf.d/50-server.cnf.bak.wk6 || true
+sed -i "s/^bind-address.*/bind-address = 127.0.0.1/" /etc/mysql/mariadb.conf.d/50-server.cnf
+systemctl restart mariadb
+
+echo "[*] MariaDB housekeeping (no remote root, no anon users)..."
+mysql -e "DELETE FROM mysql.user WHERE User=''; FLUSH PRIVILEGES;" || true
+mysql -e "UPDATE mysql.user SET Host='localhost' WHERE User='root' AND Host!='localhost'; FLUSH PRIVILEGES;" || true
+
+echo "[*] Apache hardening: headers, hide tokens, ModSecurity CRS..."
+a2enmod headers security2
+# Turn ModSecurity to On (block mode)
+if [ -f /etc/modsecurity/modsecurity.conf ]; then
+  sed -i "s/SecRuleEngine DetectionOnly/SecRuleEngine On/" /etc/modsecurity/modsecurity.conf
+fi
+
+# Activate CRS rules (package path may vary slightly; this works on Ubuntu 22.04)
+if [ -d /usr/share/modsecurity-crs/base_rules ]; then
+  mkdir -p /usr/share/modsecurity-crs/activated_rules
+  ln -sf /usr/share/modsecurity-crs/base_rules/* /usr/share/modsecurity-crs/activated_rules/ || true
+fi
+
+# Hide tokens/signature & disable directory listing
+cat >/etc/apache2/conf-available/security-tokens.conf <<EOF
+ServerTokens Prod
+ServerSignature Off
+<Directory /var/www/html>
+    Options -Indexes +FollowSymLinks
+</Directory>
+EOF
+a2enconf security-tokens
+systemctl reload apache2
+
+echo "[*] DVWA: lock down perms & protect with Basic Auth; set default security to impossible..."
+chmod 755 /var/www/html/dvwa/hackable/uploads || true
+chmod -R 755 /var/www/html/dvwa/external/phpids/0.6/lib/IDS/tmp || true
+# Default DVWA security level to impossible
+sed -i "s/'default_security_level'.*/'default_security_level' ] = 'impossible';/" /var/www/html/dvwa/config/config.inc.php
+
+# Add simple Basic Auth on /dvwa
+cat >/etc/apache2/conf-available/dvwa-protect.conf <<EOF
+<Location /dvwa>
+    AuthType Basic
+    AuthName "Restricted"
+    AuthUserFile /etc/apache2/.htpasswd
+    Require valid-user
+</Location>
+EOF
+htpasswd -bc /etc/apache2/.htpasswd dvwauser "StrongPass!234"
+a2enconf dvwa-protect
+systemctl reload apache2
+
+echo "[*] Fail2ban basic SSH jail..."
+cat >/etc/fail2ban/jail.d/sshd.local <<EOF
+[sshd]
+enabled = true
+banaction = ufw
+maxretry = 5
+findtime = 600
+bantime = 3600
+EOF
+systemctl restart fail2ban
+fail2ban-client status sshd || true
+
+echo
+echo "[✓] Week-6 hardening complete."
+echo "    NOW restrict your EC2 Security Group: 22 from your IP only; 80/443 as needed; remove 21 & 3306."
+echo "    Verify: sshd password off, MySQL 127.0.0.1 only, UFW active, ModSecurity On."
+
+
+
+
+🔹 Week 6 Hardening — Full Explanation
+
+By Week 6, the task was to freeze the vulnerable server after showing that I could attack it, and then apply security hardening measures. The goal was to keep the system online but lock it down so other teams could still attempt attacks without everything being trivially exploitable.
+
+1. System Updates and Security Patching
+
+Ran apt update && apt full-upgrade to patch all known vulnerabilities.
+
+Installed unattended-upgrades so future security patches are applied automatically.
+
+✅ Why: This reduces exposure to public exploits against unpatched packages (especially Apache, OpenSSH, PHP, MySQL).
+
+2. SSH Hardening
+
+Edited /etc/ssh/sshd_config:
+
+Set PasswordAuthentication no → password logins disabled, only key-based.
+
+Set PermitRootLogin no → root cannot log in directly.
+
+Restarted SSH service.
+
+✅ Why: Removes brute-force risks against the weak student account. Only authorized key holders can log in.
+
+3. Firewall Rules (UFW)
+
+Installed and enabled UFW.
+
+Set policy:
+
+deny incoming (default)
+
+allow outgoing (default)
+
+Allowed only:
+
+TCP 22 (restricted to my IP in AWS Security Group)
+
+TCP 80, 443 (web access open to the lab / public)
+
+Blocked FTP (21) and MySQL (3306) at both UFW and AWS Security Group level.
+
+✅ Why: This ensures only the web server and controlled SSH access are exposed to attackers.
+
+4. Service Reduction
+
+Stopped and removed vsftpd (FTP).
+
+Changed MySQL bind address back to 127.0.0.1, so it only listens locally.
+
+Ran mysql_secure_installation to:
+
+Set strong root password
+
+Remove anonymous users
+
+Disable remote root login
+
+Remove test database
+
+✅ Why: Limits unnecessary attack surface. No one can directly brute-force MySQL or abuse FTP anymore.
+
+5. Apache Web Server Hardening
+
+Installed ModSecurity with the OWASP Core Rule Set (CRS) in blocking mode.
+
+Added security headers:
+
+ServerTokens Prod → hides Apache version info.
+
+ServerSignature Off → removes server footer banners.
+
+Disabled directory listing in /var/www/html.
+
+✅ Why: Makes it harder for attackers to fingerprint versions or browse sensitive files. ModSecurity helps block common injection/exploit attempts.
+
+6. DVWA Application Lockdown
+
+Changed DVWA default security level to “Impossible” in config.inc.php.
+
+Removed world-writable permissions (chmod 755) from uploads and IDS temp directories.
+
+Added Basic Authentication to /dvwa (username dvwauser, strong password).
+
+✅ Why: Keeps DVWA present for marking but prevents trivial exploitation (e.g., file upload shells, SQLi). Attackers must still try more advanced recon.
+
+7. Monitoring and Intrusion Prevention
+
+Installed fail2ban to monitor logs for repeated failed login attempts.
+
+Configured jail for SSH: 5 retries → ban IP for 1 hour.
+
+Enabled auditd to log file/system events for traceability.
+
+✅ Why: Helps detect brute-force attacks and provides audit trails.
+
+8. Verification & Freeze
+
+Confirmed running services with ss -tulpn: only ports 22, 80, 443 were exposed.
+
+Verified UFW rules with ufw status.
+
+Verified MySQL only listening on localhost.
+
+Confirmed Apache returns security headers (via curl -I).
+
+Snapshot of the instance taken (AMI) to preserve frozen state.
+
+✅ Why: This is the final “frozen” Week 6 configuration that must remain unchanged. If the system is rebooted/stopped, AWS Elastic IP ensures address persistence.
+
+🔎 Why This Setup Is Secure (Compared to Week 3)
+
+SSH hardened: no weak passwords, key-based only.
+
+Ports reduced: only 22, 80, 443 accessible; FTP and MySQL closed.
+
+Web server protected: ModSecurity CRS + headers + no directory listing.
+
+DVWA not trivially exploitable: set to impossible + access restricted.
+
+Monitoring active: fail2ban and auditd provide alerts and evidence.
+
+✅ In summary:
+By Week 6, I transformed the server from a deliberately vulnerable host into a hardened system. I closed unnecessary ports and services, enforced strong authentication, applied patches, added intrusion prevention, and locked down DVWA to prevent trivial exploitation. The system still runs continuously, serving as a target for attackers, but is significantly more resilient against common attacks.
